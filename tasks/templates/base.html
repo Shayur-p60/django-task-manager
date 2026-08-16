@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}Task Manager{% endblock %}</title>
+    <style>
+        body { font-family: Arial, Helvetica, sans-serif; background: #f4f5f7; margin: 0; color: #222; }
+        .nav { background: #2c3e50; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .nav a { color: #fff; text-decoration: none; margin-right: 16px; font-size: 14px; }
+        .nav a:hover { text-decoration: underline; }
+        .container { max-width: 480px; margin: 40px auto; background: #fff; padding: 28px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+        h2 { margin-top: 0; }
+        input[type=text], input[type=password], input[type=email] {
+            width: 100%; padding: 8px; margin: 6px 0 14px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;
+        }
+        button, .btn {
+            background: #2c3e50; color: #fff; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 14px;
+        }
+        button:hover, .btn:hover { background: #1a252f; }
+        ul.messages, ul.errorlist { list-style: none; padding: 0; }
+        ul.messages li { background: #eaf7ea; border: 1px solid #b7e0b7; padding: 8px 12px; border-radius: 4px; margin-bottom: 10px; font-size: 14px; }
+        ul.errorlist li { background: #fdeaea; border: 1px solid #e0b7b7; padding: 8px 12px; border-radius: 4px; margin-bottom: 10px; font-size: 14px; color: #a33; }
+        .task-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
+        .task-row.completed .task-title { text-decoration: line-through; color: #999; }
+        .task-actions form { display: inline; }
+        .small { font-size: 12px; color: #777; }
+    </style>
+</head>
+<body>
+    <div class="nav">
+        <div>
+            <strong>Task Manager</strong>
+            {% if user.is_authenticated %}
+                <a href="{% url 'dashboard' %}">Dashboard</a>
+                {% if user.is_staff %}<a href="{% url 'admin_dashboard' %}">Admin View</a>{% endif %}
+            {% endif %}
+        </div>
+        <div>
+            {% if user.is_authenticated %}
+                <span class="small" style="color:#ccc;">Signed in as {{ user.username }}</span>
+                <form action="{% url 'logout' %}" method="post" style="display:inline;">
+                    {% csrf_token %}
+                    <button type="submit">Logout</button>
+                </form>
+            {% else %}
+                <a href="{% url 'login' %}">Login</a>
+                <a href="{% url 'register' %}">Register</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="container">
+        {% if messages %}
+            <ul class="messages">
+                {% for message in messages %}<li>{{ message }}</li>{% endfor %}
+            </ul>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>

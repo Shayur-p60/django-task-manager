@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard{% endblock %}
+{% block content %}
+    <h2>All Users' Tasks (Admin)</h2>
+    {% if tasks %}
+        {% for task in tasks %}
+            <div class="task-row {% if task.completed %}completed{% endif %}">
+                <span class="task-title">{{ task.title }} <span class="small">— {{ task.user.username }}</span></span>
+                <span class="small">{% if task.completed %}✅{% else %}⏳{% endif %}</span>
+            </div>
+        {% endfor %}
+    {% else %}
+        <p class="small">No tasks have been created by any user yet.</p>
+    {% endif %}
+{% endblock %}

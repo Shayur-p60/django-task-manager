@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+    <h2>Your Tasks</h2>
+
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add">
+        <input type="text" name="title" placeholder="Add a new task..." required>
+        <button type="submit">Add</button>
+    </form>
+
+    {% if tasks %}
+        {% for task in tasks %}
+            <div class="task-row {% if task.completed %}completed{% endif %}">
+                <span class="task-title">{{ task.title }}</span>
+                <span class="task-actions">
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="toggle">
+                        <input type="hidden" name="task_id" value="{{ task.id }}">
+                        <button type="submit">{% if task.completed %}Undo{% else %}Done{% endif %}</button>
+                    </form>
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="task_id" value="{{ task.id }}">
+                        <button type="submit">Delete</button>
+                    </form>
+                </span>
+            </div>
+        {% endfor %}
+    {% else %}
+        <p class="small">You don't have any tasks yet — add one above.</p>
+    {% endif %}
+{% endblock %}
