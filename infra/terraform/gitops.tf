@@ -164,9 +164,9 @@ resource "helm_release" "argocd_root_app" {
           server    = "https://kubernetes.default.svc"
           namespace = "argocd"
         }
-        syncPolicy = {
+        syncPolicy = var.gitops_auto_sync ? {
           automated = { prune = true, selfHeal = true }
-        }
+        } : {}
       }
     }
   })]

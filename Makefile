@@ -4,7 +4,11 @@
 
 CLUSTER          ?= tasks
 CONTEXT          := k3d-$(CLUSTER)
+# Argo CD deploys the signed GHCR image into $(NAMESPACE) from gitops/.
+# dev-deploy installs local, unsigned builds into $(DEV_NAMESPACE) instead,
+# which has no signature enforcement.
 NAMESPACE        ?= task-manager
+DEV_NAMESPACE    ?= task-manager-dev
 HOST             ?= tasks.localhost
 HTTP_PORT        ?= 80
 REGISTRY_PORT    ?= 5111
@@ -34,17 +38,19 @@ KUBECONFORM := kubeconform -strict -summary \
 	-schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 
 .DEFAULT_GOAL := help
-.PHONY: help cluster-up cluster-down kube-context-check build-push deploy undeploy \
-	smoke-test status logs lint tf-check helm-check
+.PHONY: help cluster-up cluster-down kube-context-check build-push dev-deploy dev-undeploy \
+	secrets smoke-test status gitops-status logs lint tf-check helm-check \
+	argocd-password argocd-ui
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-20s %s\n", $$1, $$2}'
 
 # --- Cluster ---------------------------------------------------------------
 
-cluster-up: ## Create the k3d cluster, registry, ingress-nginx and CloudNativePG (Terraform)
+cluster-up: ## Create the cluster and platform (Terraform), then the app secret; Argo CD deploys the rest
 	terraform -chdir=$(TF_DIR) init -input=false
-	terraform -chdir=$(TF_DIR) apply -input=false -auto-approve
+	terraform -chdir=$(TF_DIR) apply -input=false -auto-approve $(if $(GITOPS_REVISION),-var gitops_revision=$(GITOPS_REVISION))
+	$(MAKE) secrets
 
 cluster-down: ## Delete the cluster and registry (Terraform destroy)
 	terraform -chdir=$(TF_DIR) destroy -input=false -auto-approve
@@ -63,30 +69,49 @@ build-push: ## Build the image and push it to the k3d registry, tagged with the 
 	docker push $(REGISTRY_PUSH)/$(IMAGE):$(TAG)
 	@echo "Pushed $(REGISTRY_PUSH)/$(IMAGE):$(TAG) (cluster pulls it as $(REGISTRY_CLUSTER)/$(IMAGE):$(TAG))"
 
-# --- Deploy ----------------------------------------------------------------
+# --- Secrets ----------------------------------------------------------------
 
-deploy: kube-context-check ## Install/upgrade the database and the app
+secrets: kube-context-check ## Create the SECRET_KEY Secret in $(NAMESPACE) if missing (placeholder secrets management)
+	@$(KUBECTL) create namespace $(NAMESPACE) --dry-run=client -o yaml | $(KUBECTL) apply -f - >/dev/null
+	@# Generated once and kept; the value is piped in, so it never appears
+	@# in values, command-line arguments or git.
+	@$(KUBECTL) -n $(NAMESPACE) get secret $(SECRET_KEY_SECRET) >/dev/null 2>&1 \
+		&& echo "Secret $(SECRET_KEY_SECRET) already exists in $(NAMESPACE)" \
+		|| { python3 -c 'import secrets, sys; sys.stdout.write(secrets.token_urlsafe(50))' \
+			| $(KUBECTL) -n $(NAMESPACE) create secret generic $(SECRET_KEY_SECRET) --from-file=SECRET_KEY=/dev/stdin; }
+
+# --- Argo CD ----------------------------------------------------------------
+
+argocd-password: ## Print the Argo CD admin password (from Terraform state)
+	@terraform -chdir=$(TF_DIR) output -raw argocd_admin_password; echo
+
+argocd-ui: kube-context-check ## Open the Argo CD UI via port-forward on https://localhost:8443 (user: admin)
+	@echo "Argo CD UI: https://localhost:8443  (user: admin, password: make argocd-password). Ctrl+C to stop."
+	$(KUBECTL) -n argocd port-forward svc/argocd-server 8443:443
+
+gitops-status: kube-context-check ## Show Argo CD Applications: sync, health and deployed revision
+	@$(KUBECTL) -n argocd get applications -o custom-columns='APP:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status,REVISION:.status.sync.revision,REVISIONS:.status.sync.revisions'
+
+# --- Local, unsigned builds (no GitOps) -------------------------------------
+
+dev-deploy: kube-context-check ## Deploy a local build (make build-push) into $(DEV_NAMESPACE), outside GitOps
 	@$(CURL) --fail -o /dev/null http://$(REGISTRY_PUSH)/v2/$(IMAGE)/manifests/$(TAG) \
 		-H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json' \
 		|| { echo "ERROR: image $(IMAGE):$(TAG) is not in the registry. Run 'make build-push' first." >&2; exit 1; }
-	$(KUBECTL) create namespace $(NAMESPACE) --dry-run=client -o yaml | $(KUBECTL) apply -f -
-	@# Placeholder secret management: generate SECRET_KEY once and keep it.
-	@# The value is piped in, so it never appears in values, args or the repo.
-	@$(KUBECTL) -n $(NAMESPACE) get secret $(SECRET_KEY_SECRET) >/dev/null 2>&1 \
-		&& echo "Secret $(SECRET_KEY_SECRET) already exists" \
-		|| { python3 -c 'import secrets, sys; sys.stdout.write(secrets.token_urlsafe(50))' \
-			| $(KUBECTL) -n $(NAMESPACE) create secret generic $(SECRET_KEY_SECRET) --from-file=SECRET_KEY=/dev/stdin; }
-	$(HELM) upgrade --install task-manager-db $(CHART_DB) -n $(NAMESPACE) --wait --timeout 5m
-	$(KUBECTL) -n $(NAMESPACE) wait --for=condition=Ready cluster.postgresql.cnpg.io/task-manager-db --timeout=300s
-	$(HELM) upgrade --install task-manager $(CHART_APP) -n $(NAMESPACE) \
+	$(MAKE) secrets NAMESPACE=$(DEV_NAMESPACE)
+	$(HELM) upgrade --install task-manager-db $(CHART_DB) -n $(DEV_NAMESPACE) --wait --timeout 5m
+	$(KUBECTL) -n $(DEV_NAMESPACE) wait --for=condition=Ready cluster.postgresql.cnpg.io/task-manager-db --timeout=300s
+	$(HELM) upgrade --install task-manager $(CHART_APP) -n $(DEV_NAMESPACE) \
 		--set image.repository=$(REGISTRY_CLUSTER)/$(IMAGE) \
 		--set image.tag=$(TAG) \
-		--set host=$(HOST) \
+		--set host=dev.$(HOST) \
+		--set autoscaling.minReplicas=1 \
+		--set podDisruptionBudget.enabled=false \
 		--wait --timeout 10m
 
-undeploy: kube-context-check ## Remove the app and database releases (keeps the namespace)
-	-$(HELM) uninstall task-manager -n $(NAMESPACE)
-	-$(HELM) uninstall task-manager-db -n $(NAMESPACE)
+dev-undeploy: kube-context-check ## Remove the $(DEV_NAMESPACE) releases
+	-$(HELM) uninstall task-manager -n $(DEV_NAMESPACE)
+	-$(HELM) uninstall task-manager-db -n $(DEV_NAMESPACE)
 
 # --- Checks ----------------------------------------------------------------
 
@@ -99,8 +124,9 @@ smoke-test: kube-context-check ## curl /healthz/ through the ingress
 	echo "ERROR: $(BASE_URL)/healthz/ did not return 200" >&2; \
 	$(CURL) -i $(BASE_URL)/healthz/ >&2; exit 1
 
-status: kube-context-check ## Show the app's Kubernetes resources
+status: kube-context-check ## Show the app's Kubernetes resources and Argo CD state
 	$(KUBECTL) -n $(NAMESPACE) get pods,svc,ingress,jobs,hpa,pdb,clusters.postgresql.cnpg.io
+	@$(MAKE) --no-print-directory gitops-status
 
 logs: kube-context-check ## Tail the web pods' logs
 	$(KUBECTL) -n $(NAMESPACE) logs -l app.kubernetes.io/name=task-manager --all-containers --prefix -f --tail=50
@@ -118,3 +144,6 @@ helm-check: ## helm lint and helm template | kubeconform for both charts
 	helm template task-manager-db $(CHART_DB) | $(KUBECONFORM)
 	helm template task-manager $(CHART_APP) --set image.tag=ci | $(KUBECONFORM)
 	helm template task-manager $(CHART_APP) --set image.tag=ci --set autoscaling.enabled=false | $(KUBECONFORM)
+	helm template task-manager $(CHART_APP) -f gitops/envs/local/task-manager/values.yaml | $(KUBECONFORM)
+	helm template task-manager-db $(CHART_DB) -f gitops/envs/local/task-manager-db/values.yaml | $(KUBECONFORM)
+	$(KUBECONFORM) gitops/apps gitops/platform

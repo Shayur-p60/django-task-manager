@@ -13,7 +13,7 @@ spec:
   # nothing can start in the namespace before the policies exist.
   source:
     repoURL: https://github.com/Shayur-p60/django-task-manager.git
-    targetRevision: feature/gitops
+    targetRevision: main
     path: gitops/platform
   destination:
     server: https://kubernetes.default.svc

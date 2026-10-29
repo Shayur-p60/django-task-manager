@@ -13,14 +13,14 @@ spec:
   # hook needs the database and its generated Secret.
   sources:
     - repoURL: https://github.com/Shayur-p60/django-task-manager.git
-      targetRevision: feature/gitops
+      targetRevision: main
       path: deploy/helm/task-manager-db
       helm:
         releaseName: task-manager-db
         valueFiles:
           - $values/gitops/envs/local/task-manager-db/values.yaml
     - repoURL: https://github.com/Shayur-p60/django-task-manager.git
-      targetRevision: feature/gitops
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc

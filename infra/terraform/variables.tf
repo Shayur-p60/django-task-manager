@@ -82,6 +82,16 @@ variable "gitops_repo_url" {
   default     = "https://github.com/Shayur-p60/django-task-manager.git"
 }
 
+variable "gitops_auto_sync" {
+  description = <<-EOT
+    Automated sync (with self-heal and prune) for the root Application.
+    Set to false to pause it, e.g. while switching gitops_revision during
+    a merge; child Applications keep their own sync policy.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "gitops_revision" {
   description = <<-EOT
     Branch the root Application tracks. Keep "main"; override only to try

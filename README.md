@@ -358,18 +358,213 @@ trivy config infra/terraform
 docker build -t task-manager:scan . && .github/scripts/scan-image.sh task-manager:scan
 ```
 
-## Run on local Kubernetes
+## Run on local Kubernetes (GitOps)
 
-The app can also run on a local Kubernetes cluster (k3d) with
-ingress-nginx and a CloudNativePG PostgreSQL database, set up by
-Terraform and deployed with Helm:
+The app runs on a local Kubernetes cluster (k3d) and is deployed the
+GitOps way: **git is the source of truth, and Argo CD makes the cluster
+match it.** Terraform sets up the cluster and platform; nobody runs
+`helm install` or `kubectl apply` against the app.
 
 ```bash
-make cluster-up build-push deploy smoke-test
+make cluster-up      # k3d, ingress-nginx, CloudNativePG, Argo CD, Kyverno, root app
+make gitops-status   # Argo CD Applications: sync, health, deployed revision
+make smoke-test      # GET http://tasks.localhost/healthz/ through the ingress
 ```
 
-Then open `http://tasks.localhost`. See [`infra/README.md`](infra/README.md)
-for prerequisites, the architecture and how it works.
+See [`infra/README.md`](infra/README.md) for prerequisites and how the
+platform is built.
+
+### From `git push` to a running pod
+
+```mermaid
+flowchart TB
+    dev(["git push / PR merged to main"]) --> ci
+
+    subgraph ci["GitHub Actions (ci.yml)"]
+        direction TB
+        gates["tests + security gates"] --> changes{"only gitops/<br/>changed?"}
+        changes -- "yes: no new image" --> skip(["publish skipped"])
+        changes -- no --> build["build + scan amd64 & arm64<br/>push · index · SBOM"]
+        build --> sign["cosign sign (keyless)<br/>identity = ci.yml@refs/heads/main"]
+        sign --> promote["promote job (GitHub App)<br/>PR: gitops/envs/local values<br/>tag + digest · auto-merge"]
+    end
+
+    promote -- "PR passes CI, merges" --> git[("git: gitops/envs/local/<br/>task-manager/values.yaml")]
+
+    subgraph cluster["k3d cluster"]
+        direction TB
+        argo["Argo CD<br/>root app → platform → db → app<br/>(sync waves, self-heal, prune)"]
+        argo --> kyv{"Kyverno admission:<br/>signed by ci.yml on main?"}
+        kyv -- no --> deny(["denied: nothing changes"])
+        kyv -- yes --> presync["PreSync hook:<br/>migrations Job"]
+        presync --> rollout["rolling update<br/>Deployment (HPA 2–4)"]
+        rollout --> pod(["running pod<br/>image@sha256:…"])
+    end
+
+    git -- "polled every 60s" --> argo
+    ghcr[("GHCR<br/>signed multi-arch image")] -.-> kyv
+    ghcr -.-> pod
+```
+
+### How it fits together
+
+- **`gitops/apps/`**: the Argo CD Applications (app-of-apps). Terraform
+  creates one root Application that syncs this folder; it holds:
+  - `platform` (sync wave −1): the `task-manager` namespace with the
+    enforcement label, the Kyverno admission policies, and the API-server
+    backstop policy;
+  - `task-manager-db` (wave 0): the CloudNativePG database chart. Its
+    Cluster and the namespace are marked `Delete=false,Prune=false`, and
+    this Application has no cascade-delete finalizer, so no GitOps action
+    can delete the database (see "Protecting stateful resources" in
+    `infra/README.md`);
+  - `task-manager` (wave 1): the app chart.
+
+  Waves make Argo CD wait for each to be healthy before the next, so
+  policies exist before any pod and the database is up before migrations.
+- **`gitops/envs/local/`**: the environment's values. The app's
+  `image.tag` + `image.digest` live in `task-manager/values.yaml`; pods pull
+  `image:tag@digest`, so the tag can never be moved to a different image.
+- **Automated sync with self-heal and prune.** Manual changes are reverted
+  (for example `kubectl set env`, editing a managed label, or deleting the
+  Ingress all come back within about half a minute). Resources removed
+  from git are deleted from the cluster.
+- **Migrations** run once per sync as a PreSync hook (the chart's Helm
+  `pre-install`/`pre-upgrade` hook, which Argo CD maps to PreSync). A failed
+  migration stops the sync, so new pods never start on an unmigrated
+  database.
+
+### Signature enforcement (Kyverno)
+
+Only images signed by **this repository's `ci.yml` on `main`** may run in
+the `task-manager` namespace. Kyverno verifies the cosign keyless signature
+(certificate issuer `token.actions.githubusercontent.com`, exact subject
+`…/.github/workflows/ci.yml@refs/heads/main`) on every Pod, Deployment and
+Job before it's admitted. The CloudNativePG images in the namespace are
+verified the same way, against CloudNativePG's own release workflows.
+Any other image is denied.
+
+**Defence in depth: git is not trusted blindly.** Even if a wrong or
+malicious digest is written into `gitops/` (a compromised account, a bad
+merge, a hand-edited values file), the cluster still refuses it, because
+that image isn't signed by `ci.yml` on `main`. This was demonstrated on the
+`feature/gitops` branch:
+
+1. A commit set `image.digest` to a digest that **does exist in our own
+   GHCR repository** but was never signed by CI.
+2. Argo CD synced it; Kyverno denied the PreSync migration Job
+   (`image is not signed by the expected identity`), so the sync failed
+   before the Deployment was touched. The signed version kept serving.
+3. `git revert` of that commit brought Argo CD back to Synced/Healthy.
+
+Unsigned images applied by hand are rejected too:
+
+```console
+$ kubectl --context k3d-tasks -n task-manager run x --image=python:3.12-slim
+Error from server: admission webhook "vpol.validate.kyverno.svc-fail-finegrained-task-manager-allowed-images"
+denied the request: Policy task-manager-allowed-images failed: images not allowed in this namespace: python:3.12-slim
+```
+
+Policies: [`gitops/platform/policies.yaml`](gitops/platform/policies.yaml),
+plus an API-server [backstop](gitops/platform/backstop.yaml) that still
+restricts registries and requires digests if Kyverno itself is shut down
+(see the Kyverno outage runbook in `infra/README.md`).
+
+### Promotion: CI opens a PR
+
+After `publish` succeeds on `main`, the `promote` job writes the new
+`image.tag` (git SHA) and `image.digest` (multi-arch index digest) into
+`gitops/envs/local/task-manager/values.yaml`, opens a PR and enables
+auto-merge. When CI passes it merges, and Argo CD deploys it.
+
+**Why a PR rather than a direct commit to `main`:**
+
+| | PR + auto-merge (chosen) | Direct commit |
+|---|---|---|
+| Branch protection | respected | needs a bypass for the bot |
+| Audit trail | a PR per promotion, linked to the publish run | a commit |
+| Gate | CI runs on the change (including the targetRevision check) | none |
+| Rollback | revert the PR's commit | revert the commit |
+| Speed | a few minutes (CI) | immediate |
+
+The PR is opened with a **GitHub App** token, not `GITHUB_TOKEN`: PRs
+created with `GITHUB_TOKEN` don't trigger workflows, so their required
+checks would never run and the PR could never merge. A promotion PR only
+changes `gitops/`, so the `changes` job skips publishing: no new image, no
+endless build-promote loop.
+
+**One-time setup** (the `promote` job stays off until this is done):
+
+1. **Create a GitHub App** (Settings → Developer settings → GitHub Apps →
+   New GitHub App):
+   - Name: e.g. `task-manager-promoter`; Homepage URL: this repository.
+   - Webhook: **uncheck "Active"** (no webhook needed).
+   - Repository permissions: **Contents: Read and write**, **Pull
+     requests: Read and write** (Metadata: Read-only is added
+     automatically). No other permissions, no account permissions.
+   - "Where can this GitHub App be installed?": **Only on this account**.
+2. **Generate a private key** on the App's page (downloads a `.pem`), and
+   note the **App ID**.
+3. **Install the App** on this account, **Only select repositories →
+   `django-task-manager`**.
+4. **Create the environment**: repository Settings → Environments → New
+   environment `promotion`:
+   - Deployment branches and tags: **Selected branches → `main`** only.
+   - Environment variable `PROMOTION_APP_ID` = the App ID.
+   - Environment secret `PROMOTION_APP_PRIVATE_KEY` = the full `.pem`
+     contents.
+5. **Allow auto-merge**: Settings → General → Pull Requests → **Allow
+   auto-merge**.
+6. **Turn promotion on**: Settings → Secrets and variables → Actions →
+   Variables → repository variable `PROMOTION_ENABLED` = `true`.
+
+Only the `promote` job uses the `promotion` environment, and the
+environment only releases its secret to jobs running on `main`. The job
+asks the App for just `contents: write` and `pull-requests: write`; the
+token expires after an hour.
+
+### Rollback
+
+Revert the promotion commit (through a PR, like any change to `main`):
+
+```bash
+git revert <promotion-commit>    # or the "Revert" button on the merged PR
+```
+
+Argo CD syncs the previous `image.tag` + `image.digest`. That image is
+still signed by `ci.yml` on `main`, so Kyverno admits it, and the migration
+hook runs (Django migrations are forward-only: a rollback across a schema
+change needs a migration that undoes it).
+
+### Branch-tracking guard
+
+During development the Applications can point at a feature branch so
+Argo CD syncs work in progress. The `GitOps manifests check` CI job fails
+if any Application in `gitops/apps/` tracks anything other than `main`,
+so that setting can't be merged.
+
+### Argo CD UI (no ingress)
+
+The UI is deliberately **not** exposed through the ingress:
+
+```bash
+make argocd-password   # admin password (random, from Terraform state)
+make argocd-ui         # port-forward → https://localhost:8443, user admin
+```
+
+Terraform sets a random admin password from the start, so
+`argocd-initial-admin-secret` is never created (and is deleted if it
+exists).
+
+### Local, unsigned builds
+
+`task-manager` only runs signed images from GHCR. To try a local build
+without going through CI, deploy it to a separate namespace that has no
+signature enforcement:
+
+```bash
+make build-push dev-deploy   # → task-manager-dev, http://dev.tasks.localhost
+```
 
 ## REST API
 
@@ -533,9 +728,13 @@ task_manager_app/
 │   ├── workflows/ci.yml   # tests, security gates, signed release
 │   ├── scripts/           # tool installer (SHA-256 checked), image scan, pip-audit → SARIF
 │   └── dependabot.yml
-├── Makefile               # local Kubernetes: cluster-up, build-push, deploy, smoke-test
-├── infra/                 # Terraform for the local k3d cluster (see infra/README.md)
+├── Makefile               # local Kubernetes: cluster-up, gitops-status, smoke-test, argocd-ui, dev-deploy
+├── infra/                 # Terraform: k3d, ingress-nginx, CNPG, Argo CD, Kyverno (see infra/README.md)
 ├── deploy/helm/           # Helm charts: task-manager (app), task-manager-db (CNPG)
+├── gitops/
+│   ├── apps/              # Argo CD Applications (app-of-apps): platform, db, app
+│   ├── platform/          # namespace + Kyverno image-signature policies
+│   └── envs/local/        # environment values; image tag + digest (bumped by CI)
 ├── Dockerfile
 ├── docker-compose.yml     # web + postgres, for running locally
 ├── docker-entrypoint.sh   # runs migrations, then gunicorn

@@ -13,14 +13,14 @@ spec:
   # values.yaml and are bumped by CI's promote job.
   sources:
     - repoURL: https://github.com/Shayur-p60/django-task-manager.git
-      targetRevision: feature/gitops
+      targetRevision: main
       path: deploy/helm/task-manager
       helm:
         releaseName: task-manager
         valueFiles:
           - $values/gitops/envs/local/task-manager/values.yaml
     - repoURL: https://github.com/Shayur-p60/django-task-manager.git
-      targetRevision: feature/gitops
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
