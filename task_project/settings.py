@@ -11,7 +11,9 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 from pathlib import Path
-from decouple import config, Csv
+
+import dj_database_url
+from decouple import Csv, config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -22,17 +24,20 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 # Read from the environment (.env locally, real env vars in production).
-# The fallback below is ONLY for convenience running the test suite/CI —
-# never rely on it for an actual deployment.
-SECRET_KEY = config(
-    'SECRET_KEY',
-    default='django-insecure-fallback-key-for-local-dev-only-do-not-use-in-prod',
-)
+# The fallback below is ONLY for convenience running the test suite/CI.
+# With DEBUG=False, the check in tasks/checks.py refuses to start with it.
+INSECURE_DEFAULT_SECRET_KEY = 'django-insecure-fallback-key-for-local-dev-only-do-not-use-in-prod'
+SECRET_KEY = config('SECRET_KEY', default=INSECURE_DEFAULT_SECRET_KEY)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=False, cast=bool)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='127.0.0.1,localhost', cast=Csv())
+
+# Full origins (scheme + host) allowed to send POST forms, e.g.
+# https://tasks.example.com. Only needed when the site is reached through a
+# different host than the one Django sees.
+CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='', cast=Csv())
 
 
 # Application definition
@@ -53,6 +58,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Serves collected static files directly from gunicorn (no nginx needed).
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -83,12 +90,16 @@ WSGI_APPLICATION = 'task_project.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
+#
+# Set DATABASE_URL (e.g. postgres://user:pass@host:5432/dbname) in
+# production. Without it, a local SQLite file is used.
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': dj_database_url.config(
+        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
+        conn_max_age=config('DB_CONN_MAX_AGE', default=600, cast=int),
+        conn_health_checks=True,
+    ),
 }
 
 
@@ -127,6 +138,18 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'  # filled by `collectstatic`
+
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    # Compressed files with content hashes in their names, so browsers can
+    # cache them forever. Needs `collectstatic` before serving with DEBUG=False.
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -166,6 +189,11 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'api_token': config('API_TOKEN_THROTTLE_RATE', default='10/minute'),
     },
+    # Number of proxies in front of the app, so throttling uses the real
+    # client IP from X-Forwarded-For. Leave unset when clients connect
+    # directly; set it (usually 1) behind a load balancer or PaaS proxy,
+    # otherwise every client shares the proxy's IP and one throttle bucket.
+    'NUM_PROXIES': config('NUM_PROXIES', default=None, cast=lambda v: int(v) if v not in (None, '') else None),
 }
 
 SPECTACULAR_SETTINGS = {
@@ -176,11 +204,80 @@ SPECTACULAR_SETTINGS = {
 }
 
 
-# Email
+# Email (used for password reset)
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
+#
+# Defaults to the console backend, which prints emails to the server log.
+# For real delivery set EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+# and the EMAIL_HOST* variables below.
 
-MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
-    },
+# (Django 6.1 doesn't allow the old EMAIL_* setting names next to MAILERS,
+# so the env vars are read into private names here.)
+_email_backend = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
+
+_mailer = {'BACKEND': _email_backend}
+if _email_backend == 'django.core.mail.backends.smtp.EmailBackend':
+    _mailer['OPTIONS'] = {
+        'host': config('EMAIL_HOST', default='localhost'),
+        'port': config('EMAIL_PORT', default=587, cast=int),
+        'username': config('EMAIL_HOST_USER', default=''),
+        'password': config('EMAIL_HOST_PASSWORD', default=''),
+        'use_tls': config('EMAIL_USE_TLS', default=True, cast=bool),
+        'use_ssl': config('EMAIL_USE_SSL', default=False, cast=bool),
+        'timeout': config('EMAIL_TIMEOUT', default=10, cast=int),
+    }
+MAILERS = {'default': _mailer}
+
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='Task Manager <noreply@localhost>')
+SERVER_EMAIL = config('SERVER_EMAIL', default=DEFAULT_FROM_EMAIL)
+
+
+# --- Production security (only applies when DEBUG=False) ---
+# https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
+
+if not DEBUG:
+    # Render, Railway and most PaaS hosts end HTTPS at their proxy and pass
+    # the original scheme in X-Forwarded-Proto. Only trust this header when
+    # the app is behind such a proxy.
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+    # Set USE_HTTPS=False only to try the production setup over plain HTTP
+    # locally (e.g. docker compose). Never in a real deployment.
+    USE_HTTPS = config('USE_HTTPS', default=True, cast=bool)
+
+    SECURE_SSL_REDIRECT = USE_HTTPS
+    SECURE_REDIRECT_EXEMPT = [r'^healthz/$']  # platform health checks use plain HTTP
+    SESSION_COOKIE_SECURE = USE_HTTPS
+    CSRF_COOKIE_SECURE = USE_HTTPS
+
+    # HSTS tells browsers to only ever use HTTPS for this site. Start with a
+    # short value if you're unsure, then raise it; browsers remember it.
+    SECURE_HSTS_SECONDS = config('SECURE_HSTS_SECONDS', default=60 * 60 * 24 * 30, cast=int) if USE_HTTPS else 0
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = config('SECURE_HSTS_INCLUDE_SUBDOMAINS', default=True, cast=bool)
+    SECURE_HSTS_PRELOAD = config('SECURE_HSTS_PRELOAD', default=False, cast=bool)
+
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = 'same-origin'
+    SESSION_COOKIE_HTTPONLY = True
+    X_FRAME_OPTIONS = 'DENY'
+
+# HSTS preload is a long-term commitment, so it's opt-in through
+# SECURE_HSTS_PRELOAD rather than flagged by `check --deploy`.
+SILENCED_SYSTEM_CHECKS = ['security.W021']
+
+# `check --deploy` (run by docker-entrypoint.sh) rejects the console email
+# backend because password reset emails would never be delivered. Set
+# ALLOW_CONSOLE_EMAIL=True to accept that, e.g. for local docker compose or
+# a demo without SMTP; emails are then only written to the logs.
+if config('ALLOW_CONSOLE_EMAIL', default=False, cast=bool):
+    SILENCED_SYSTEM_CHECKS.append('mail.E001')
+
+
+# --- Logging: send everything to stdout so Docker/PaaS logs pick it up ---
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {'console': {'class': 'logging.StreamHandler'}},
+    'root': {'handlers': ['console'], 'level': config('LOG_LEVEL', default='INFO')},
 }

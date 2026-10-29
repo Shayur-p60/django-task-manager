@@ -3,7 +3,9 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import UserCreationForm
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
+from django.db import connection
 from django.db.models import F
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -23,6 +25,17 @@ SORT_ORDERING = {
     'due': [F('due_date').asc(nulls_last=True), '-priority', '-created_at'],
     'priority': ['-priority', F('due_date').asc(nulls_last=True), '-created_at'],
 }
+
+
+@require_http_methods(['GET', 'HEAD'])
+def healthz(request):
+    """Health check for Docker and hosting platforms: app is up and the DB answers."""
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+    except Exception:
+        return JsonResponse({'status': 'error', 'database': 'unavailable'}, status=503)
+    return JsonResponse({'status': 'ok'})
 
 
 def register(request):

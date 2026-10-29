@@ -14,3 +14,6 @@ venv/
 # Editor
 .vscode/
 .idea/
+
+# Collected static files (built by collectstatic)
+staticfiles/

@@ -1,0 +1,46 @@
+# Production-like stack for running locally: gunicorn + PostgreSQL.
+#   SECRET_KEY=... docker compose up --build
+# Then open http://localhost:8000
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: tasks
+      POSTGRES_USER: tasks
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tasks-local-only}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tasks -d tasks"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    image: task-manager:latest
+    ports:
+      - "8000:8000"
+    environment:
+      DEBUG: "False"
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in your shell or in .env}
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      DATABASE_URL: postgres://tasks:${POSTGRES_PASSWORD:-tasks-local-only}@db:5432/tasks
+      # Plain HTTP on localhost. Leave this out behind real HTTPS.
+      USE_HTTPS: "False"
+      EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.console.EmailBackend}
+      # Password reset emails go to the logs; accept that locally so the
+      # startup deploy check doesn't refuse the console backend.
+      ALLOW_CONSOLE_EMAIL: ${ALLOW_CONSOLE_EMAIL:-True}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz/', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  postgres-data:
