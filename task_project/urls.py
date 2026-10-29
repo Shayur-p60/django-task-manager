@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
 from tasks import views
 from tasks.forms import ThrottledAuthenticationForm
 from django.contrib.auth import views as auth_views
@@ -16,6 +16,9 @@ urlpatterns = [
     path('tasks/<int:pk>/toggle/', views.task_toggle, name='task_toggle'),
     path('tasks/<int:pk>/delete/', views.task_delete, name='task_delete'),
     path('admin-dashboard/', views.admin_dashboard, name='admin_dashboard'),
+
+    # REST API (see tasks/api/) and its OpenAPI docs at /api/docs/
+    path('api/', include('tasks.api.urls')),
 
     # Built-in auth views (login / logout). Login uses a throttled form —
     # see tasks/forms.py — to slow down brute-force credential attempts.

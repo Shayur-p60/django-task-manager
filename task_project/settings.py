@@ -44,6 +44,10 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
+    'rest_framework.authtoken',
+    'django_filters',
+    'drf_spectacular',
     'tasks',
 ]
 
@@ -140,6 +144,36 @@ LOGOUT_REDIRECT_URL = 'login'
 # Login attempt throttling (see tasks/forms.py: ThrottledAuthenticationForm)
 LOGIN_THROTTLE_MAX_ATTEMPTS = config('LOGIN_THROTTLE_MAX_ATTEMPTS', default=5, cast=int)
 LOGIN_THROTTLE_LOCKOUT_SECONDS = config('LOGIN_THROTTLE_LOCKOUT_SECONDS', default=15 * 60, cast=int)
+
+
+# --- REST API (Django REST Framework) ---
+
+REST_FRAMEWORK = {
+    # Token auth comes first so unauthenticated requests get a 401 with a
+    # WWW-Authenticate header; session auth powers the browsable API.
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 10,
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    # Per-IP limit on the token endpoint, on top of the per-username
+    # lockout shared with the web login form.
+    'DEFAULT_THROTTLE_RATES': {
+        'api_token': config('API_TOKEN_THROTTLE_RATE', default='10/minute'),
+    },
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Task Manager API',
+    'DESCRIPTION': 'Manage your own tasks. Authenticate with a token from /api/token/.',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+}
 
 
 # Email
