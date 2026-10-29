@@ -29,3 +29,66 @@ jobs:
 
       - name: Run tests
         run: pytest -v
+
+      - name: Check production settings
+        env:
+          DEBUG: "False"
+          ALLOWED_HOSTS: tasks.example.com
+          DATABASE_URL: postgres://tasks:unused@db.example.com:5432/tasks
+          # The deploy check rejects the console email backend, as it should.
+          EMAIL_BACKEND: django.core.mail.backends.smtp.EmailBackend
+          EMAIL_HOST: smtp.example.com
+        run: |
+          export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(50))')"
+          python manage.py check --deploy --fail-level WARNING
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate a throwaway SECRET_KEY
+        run: |
+          key="$(python3 -c 'import secrets; print(secrets.token_urlsafe(50))')"
+          echo "::add-mask::$key"
+          echo "SECRET_KEY=$key" >> "$GITHUB_ENV"
+
+      - name: Build Docker image
+        run: docker build -t task-manager:latest .
+
+      - name: Container refuses to start without a real SECRET_KEY
+        # RUN_MIGRATIONS=0 skips migrate, so this proves the entrypoint's
+        # own deploy check stops the container. Console email is allowed so
+        # the only possible failure is the SECRET_KEY check (tasks.E001).
+        run: |
+          check_refuses() {
+            set +e
+            out="$(timeout 60 docker run --rm -e RUN_MIGRATIONS=0 -e ALLOW_CONSOLE_EMAIL=True "$@" task-manager:latest 2>&1)"
+            code=$?
+            set -e
+            echo "$out"
+            if [ "$code" -eq 0 ] || [ "$code" -eq 124 ]; then
+              echo "::error::Container started (exit $code) with an insecure SECRET_KEY"; exit 1
+            fi
+            echo "$out" | grep -q "tasks.E001" || { echo "::error::Expected tasks.E001 in output"; exit 1; }
+            echo "OK: exited with code $code"
+          }
+          echo "--- no SECRET_KEY"
+          check_refuses
+          echo "--- built-in default SECRET_KEY"
+          check_refuses -e SECRET_KEY=django-insecure-fallback-key-for-local-dev-only-do-not-use-in-prod
+
+      - name: Start web + postgres and wait until healthy
+        run: |
+          docker compose up -d --no-build --wait --wait-timeout 120
+          curl --fail --silent --show-error http://localhost:8000/healthz/
+
+      - name: Show container logs
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop containers
+        if: always()
+        run: docker compose down -v

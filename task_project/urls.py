@@ -7,6 +7,9 @@ from django.contrib.auth import views as auth_views
 urlpatterns = [
     path('admin/', admin.site.urls),
 
+    # Health check for Docker / Render / Railway (exempt from the HTTPS redirect)
+    path('healthz/', views.healthz, name='healthz'),
+
     # Custom views
     path('', views.dashboard, name='home'),
     path('register/', views.register, name='register'),
