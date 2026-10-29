@@ -4,7 +4,7 @@
 image:
   repository: ghcr.io/shayur-p60/task-manager
   tag: dd524fcff69f1ffca1cd6126dbd29a02f646048b
-  digest: sha256:a341e52df5a1f34541f403efde10392270c94361dcca0095c303143314770011
+  digest: sha256:a1021d5bf157f3fb57a30b6d82394fd0f967f50c7bb85aabf79e42c1512db8c2
   pullPolicy: IfNotPresent
 
 host: tasks.localhost
