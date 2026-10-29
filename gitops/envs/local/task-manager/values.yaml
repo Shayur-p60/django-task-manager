@@ -3,9 +3,8 @@
 # publish on main; roll back by reverting that commit.
 image:
   repository: ghcr.io/shayur-p60/task-manager
-  tag: dd524fcff69f1ffca1cd6126dbd29a02f646048b
-  digest: sha256:a341e52df5a1f34541f403efde10392270c94361dcca0095c303143314770011
+  tag: 60779262320c4d0c008ca362afd7adfaa123ee1f
+  digest: sha256:ef94b7878ae4e0180fa465068049c801b8209f48f4848c74d7e7cd95f739abda
   pullPolicy: IfNotPresent
-
 host: tasks.localhost
 scheme: http
