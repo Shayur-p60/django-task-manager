@@ -11,6 +11,10 @@ urlpatterns = [
     path('', views.dashboard, name='home'),
     path('register/', views.register, name='register'),
     path('dashboard/', views.dashboard, name='dashboard'),
+    path('tasks/new/', views.task_create, name='task_create'),
+    path('tasks/<int:pk>/edit/', views.task_update, name='task_update'),
+    path('tasks/<int:pk>/toggle/', views.task_toggle, name='task_toggle'),
+    path('tasks/<int:pk>/delete/', views.task_delete, name='task_delete'),
     path('admin-dashboard/', views.admin_dashboard, name='admin_dashboard'),
 
     # Built-in auth views (login / logout). Login uses a throttled form —

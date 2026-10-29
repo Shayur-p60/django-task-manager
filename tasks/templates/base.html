@@ -24,6 +24,20 @@
         .task-row.completed .task-title { text-decoration: line-through; color: #999; }
         .task-actions form { display: inline; }
         .small { font-size: 12px; color: #777; }
+        textarea, select, input[type=date] { padding: 7px; margin: 6px 0 14px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font: inherit; font-size: 14px; }
+        textarea { width: 100%; }
+        label { font-size: 14px; }
+        .form-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+        .form-row select, .form-row input[type=date] { margin: 0 0 0 4px; }
+        .filters { margin: 18px 0 8px; padding-top: 14px; border-top: 1px solid #eee; }
+        .task-actions .btn { display: inline-block; text-decoration: none; }
+        .badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 10px; margin-left: 4px; background: #eef1f4; color: #2c3e50; }
+        .badge.priority-high { background: #fdeaea; color: #a33; }
+        .badge.priority-low { background: #eaf7ea; color: #2e6b2e; }
+        .badge.overdue-badge { background: #c0392b; color: #fff; }
+        .task-row.overdue { border-left: 3px solid #c0392b; padding-left: 8px; }
+        .pagination { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; font-size: 14px; }
+        .pagination a { color: #2c3e50; }
     </style>
 </head>
 <body>
