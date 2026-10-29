@@ -179,6 +179,44 @@ jobs:
       - name: helm lint and helm template | kubeconform
         run: make helm-check
 
+  changes:
+    name: Detect changes
+    # Decides whether this push needs a new image. A commit that only touches
+    # gitops/ (a promotion or a rollback) must not publish, or every
+    # promotion would trigger another build and promotion.
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.detect.outputs.app }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Anything outside gitops/ changed?
+        id: detect
+        env:
+          BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
+        run: .github/scripts/detect-changes.sh "$BASE" "${HEAD:-$GITHUB_SHA}"
+
+  gitops-check:
+    name: GitOps manifests check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Applications must track main
+        run: |
+          pip install "pyyaml==6.0.3"
+          python .github/scripts/check-gitops-target.py gitops/apps
+
   # ------------------------------------------------------- security gates --
 
   secrets:
@@ -472,8 +510,9 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
-      github.repository == 'Shayur-p60/django-task-manager'
-    needs: [test, docker-smoke, k8s-lint, secrets, sast, dependencies, iac, dockerfile]
+      github.repository == 'Shayur-p60/django-task-manager' &&
+      needs.changes.outputs.app == 'true'
+    needs: [changes, test, docker-smoke, k8s-lint, gitops-check, secrets, sast, dependencies, iac, dockerfile]
     runs-on: ${{ matrix.runner }}
     concurrency:
       group: publish-main-${{ matrix.arch }}

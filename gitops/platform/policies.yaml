@@ -1,0 +1,184 @@
+# Admission policies for the task-manager namespace (Kyverno).
+#
+# Every image must be keyless-signed (cosign, GitHub OIDC) by the exact
+# workflow that is allowed to build it; anything else is denied. This also
+# protects against a bad digest being written into gitops/: git can say
+# "run this", but the cluster only runs what our CI on main signed.
+#
+# Uses ImageValidatingPolicy (policies.kyverno.io/v1): it verifies the
+# cosign 3 signature bundles (OCI referrers) both we and CloudNativePG
+# publish. Sigstore policy-controller and Kyverno's older ClusterPolicy
+# verifier could not; see infra/README.md.
+---
+# Our image: signed by this repository's ci.yml on main, and nothing else.
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: verify-task-manager-image
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  # Fetching signatures and transparency-log data can take longer than
+  # the 10s default on a cold cache; a timeout must not cause a denial.
+  webhookConfiguration:
+    timeoutSeconds: 30
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+    namespaceSelector:
+      matchLabels:
+        images.task-manager/verify: enforce
+  matchImageReferences:
+    - glob: "ghcr.io/shayur-p60/task-manager*"
+  # Images are referenced by digest in git; don't rewrite pod specs (that
+  # would show up as drift in Argo CD).
+  validationConfigurations:
+    mutateDigest: false
+    verifyDigest: false
+    required: true
+  attestors:
+    - name: signer
+      cosign:
+        keyless:
+          identities:
+            - issuer: https://token.actions.githubusercontent.com
+              subject: https://github.com/Shayur-p60/django-task-manager/.github/workflows/ci.yml@refs/heads/main
+        ctlog:
+          url: https://rekor.sigstore.dev
+  validations:
+    - expression: >-
+        (images.containers + images.initContainers + images.ephemeralContainers)
+        .map(image, verifyImageSignatures(image, [attestors.signer]))
+        .all(e, e > 0)
+      message: image is not signed by the expected identity
+---
+# PostgreSQL images: signed by CloudNativePG's image build on main.
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: verify-cnpg-postgres-image
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  # Fetching signatures and transparency-log data can take longer than
+  # the 10s default on a cold cache; a timeout must not cause a denial.
+  webhookConfiguration:
+    timeoutSeconds: 30
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+    namespaceSelector:
+      matchLabels:
+        images.task-manager/verify: enforce
+  matchImageReferences:
+    - glob: "ghcr.io/cloudnative-pg/postgresql*"
+  # Images are referenced by digest in git; don't rewrite pod specs (that
+  # would show up as drift in Argo CD).
+  validationConfigurations:
+    mutateDigest: false
+    verifyDigest: false
+    required: true
+  attestors:
+    - name: signer
+      cosign:
+        keyless:
+          identities:
+            - issuer: https://token.actions.githubusercontent.com
+              subject: https://github.com/cloudnative-pg/postgres-containers/.github/workflows/bake_targets.yml@refs/heads/main
+        ctlog:
+          url: https://rekor.sigstore.dev
+  validations:
+    - expression: >-
+        (images.containers + images.initContainers + images.ephemeralContainers)
+        .map(image, verifyImageSignatures(image, [attestors.signer]))
+        .all(e, e > 0)
+      message: image is not signed by the expected identity
+---
+# CloudNativePG operator image (runs as an init container in database pods): signed by its release workflow at a version tag.
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: verify-cnpg-operator-image
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  # Fetching signatures and transparency-log data can take longer than
+  # the 10s default on a cold cache; a timeout must not cause a denial.
+  webhookConfiguration:
+    timeoutSeconds: 30
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+    namespaceSelector:
+      matchLabels:
+        images.task-manager/verify: enforce
+  matchImageReferences:
+    - glob: "ghcr.io/cloudnative-pg/cloudnative-pg*"
+  # Images are referenced by digest in git; don't rewrite pod specs (that
+  # would show up as drift in Argo CD).
+  validationConfigurations:
+    mutateDigest: false
+    verifyDigest: false
+    required: true
+  attestors:
+    - name: signer
+      cosign:
+        keyless:
+          identities:
+            - issuer: https://token.actions.githubusercontent.com
+              subjectRegExp: '^https://github\.com/cloudnative-pg/cloudnative-pg/\.github/workflows/release-publish\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$'
+        ctlog:
+          url: https://rekor.sigstore.dev
+  validations:
+    - expression: >-
+        (images.containers + images.initContainers + images.ephemeralContainers)
+        .map(image, verifyImageSignatures(image, [attestors.signer]))
+        .all(e, e > 0)
+      message: image is not signed by the expected identity
+---
+# Default deny: any image that isn't one of the three above is rejected,
+# so an unknown image can't slip past by matching no signature policy.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: task-manager-allowed-images
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  # Fetching signatures and transparency-log data can take longer than
+  # the 10s default on a cold cache; a timeout must not cause a denial.
+  webhookConfiguration:
+    timeoutSeconds: 30
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+    namespaceSelector:
+      matchLabels:
+        images.task-manager/verify: enforce
+  variables:
+    - name: images
+      expression: >-
+        object.spec.containers.map(c, c.image)
+        + (has(object.spec.initContainers) ? object.spec.initContainers.map(c, c.image) : [])
+        + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers.map(c, c.image) : [])
+    - name: allowedRepos
+      expression: >-
+        ['ghcr.io/shayur-p60/task-manager', 'ghcr.io/cloudnative-pg/postgresql', 'ghcr.io/cloudnative-pg/cloudnative-pg']
+  validations:
+    - expression: >-
+        variables.images.all(i, variables.allowedRepos.exists(r, i.startsWith(r + ':') || i.startsWith(r + '@')))
+      messageExpression: >-
+        'images not allowed in this namespace: ' + variables.images.filter(i,
+        !variables.allowedRepos.exists(r, i.startsWith(r + ':') || i.startsWith(r + '@'))).join(', ')

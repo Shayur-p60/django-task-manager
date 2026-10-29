@@ -57,3 +57,37 @@ variable "app_host" {
   type        = string
   default     = "tasks.localhost"
 }
+
+variable "argocd_chart_version" {
+  description = "Argo CD Helm chart version."
+  type        = string
+  default     = "10.11.6"
+}
+
+variable "argocd_apps_chart_version" {
+  description = "argocd-apps Helm chart version (creates the root Application)."
+  type        = string
+  default     = "2.0.7"
+}
+
+variable "kyverno_chart_version" {
+  description = "Kyverno Helm chart version."
+  type        = string
+  default     = "3.9.2"
+}
+
+variable "gitops_repo_url" {
+  description = "Git repository Argo CD syncs from."
+  type        = string
+  default     = "https://github.com/Shayur-p60/django-task-manager.git"
+}
+
+variable "gitops_revision" {
+  description = <<-EOT
+    Branch the root Application tracks. Keep "main"; override only to try
+    work in progress, e.g. -var gitops_revision=feature/gitops. The child
+    Applications in gitops/apps/ must track main to merge (checked in CI).
+  EOT
+  type        = string
+  default     = "main"
+}

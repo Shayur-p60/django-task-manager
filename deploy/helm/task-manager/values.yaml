@@ -2,6 +2,10 @@ image:
   repository: k3d-tasks-registry.localhost:5111/task-manager
   # Required. Set to an immutable tag such as the git SHA; "latest" is rejected.
   tag: ""
+  # Optional, recommended: the image (index) digest, e.g. sha256:abc...
+  # When set, the pod pulls repository:tag@digest, so the tag can't be
+  # moved to a different image. The GitOps values always set it.
+  digest: ""
   pullPolicy: IfNotPresent
 
 # Used only when autoscaling is disabled. With the HPA enabled the

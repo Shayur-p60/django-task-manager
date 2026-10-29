@@ -1,0 +1,7 @@
+# Local environment (k3d) values for the task-manager-db chart.
+instances: 1
+# Pinned by digest, so admission control verifies exactly the image the
+# node pulls. Signed by CloudNativePG (see gitops/platform/policies.yaml).
+imageName: ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie@sha256:348997438269fddc0e2825e00594367ad61751adb08a7698a0a14f793b0dc2ce
+storage:
+  size: 1Gi

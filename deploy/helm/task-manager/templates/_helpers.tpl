@@ -9,19 +9,31 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "task-manager.labels" -}}
 {{ include "task-manager.selectorLabels" . }}
-app.kubernetes.io/version: {{ .Values.image.tag | quote }}
+app.kubernetes.io/version: {{ .Values.image.tag | toString | trunc 63 | trimSuffix "-" | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/part-of: task-manager
 helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
 {{- end -}}
 
-{{/* Image reference. Refuses an empty or "latest" tag. */}}
+{{/*
+Image reference: repository:tag, or repository:tag@digest when a digest is
+set (the digest is what's pulled and verified; the tag is for humans).
+Refuses an empty or "latest" tag and a malformed digest.
+*/}}
 {{- define "task-manager.image" -}}
 {{- $tag := .Values.image.tag | toString -}}
 {{- if or (eq $tag "") (eq $tag "latest") -}}
 {{- fail "image.tag must be set to an immutable tag (e.g. the git SHA); empty and \"latest\" are not allowed" -}}
 {{- end -}}
+{{- $digest := .Values.image.digest | default "" | toString -}}
+{{- if $digest -}}
+{{- if not (regexMatch "^sha256:[0-9a-f]{64}$" $digest) -}}
+{{- fail (printf "image.digest must look like sha256:<64 hex chars>, got %q" $digest) -}}
+{{- end -}}
+{{- printf "%s:%s@%s" .Values.image.repository $tag $digest -}}
+{{- else -}}
 {{- printf "%s:%s" .Values.image.repository $tag -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

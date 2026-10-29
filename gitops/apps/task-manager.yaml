@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: task-manager
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  # The app. Its image tag + digest live in gitops/envs/local/task-manager/
+  # values.yaml and are bumped by CI's promote job.
+  sources:
+    - repoURL: https://github.com/Shayur-p60/django-task-manager.git
+      targetRevision: feature/gitops
+      path: deploy/helm/task-manager
+      helm:
+        releaseName: task-manager
+        valueFiles:
+          - $values/gitops/envs/local/task-manager/values.yaml
+    - repoURL: https://github.com/Shayur-p60/django-task-manager.git
+      targetRevision: feature/gitops
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: task-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff: {duration: 10s, factor: 2, maxDuration: 3m}
