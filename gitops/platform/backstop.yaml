@@ -1,0 +1,52 @@
+# Backstop that doesn't depend on Kyverno.
+#
+# Kyverno's signature policies (policies.yaml) fail closed while Kyverno is
+# unreachable: its webhooks stay registered with failurePolicy: Fail. But
+# when Kyverno is shut down *gracefully* (scaled to zero, uninstalled), it
+# deletes its own webhook configurations, and nothing would be checked.
+#
+# This ValidatingAdmissionPolicy is evaluated by the Kubernetes API server
+# itself, so it's always on. It can't verify signatures, but it keeps the
+# namespace to the three allowed repositories and requires our own images
+# to be pinned by digest. See infra/README.md, "Kyverno outage runbook".
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: task-manager-image-backstop
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+    namespaceSelector:
+      matchLabels:
+        images.task-manager/verify: enforce
+  variables:
+    - name: images
+      expression: >-
+        object.spec.containers.map(c, c.image)
+        + (has(object.spec.initContainers) ? object.spec.initContainers.map(c, c.image) : [])
+        + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers.map(c, c.image) : [])
+    - name: allowedRepos
+      expression: >-
+        ['ghcr.io/shayur-p60/task-manager', 'ghcr.io/cloudnative-pg/postgresql', 'ghcr.io/cloudnative-pg/cloudnative-pg']
+  validations:
+    - expression: >-
+        variables.images.all(i, variables.allowedRepos.exists(r, i.startsWith(r + ':') || i.startsWith(r + '@')))
+      messageExpression: >-
+        'images not allowed in this namespace: ' + variables.images.filter(i,
+        !variables.allowedRepos.exists(r, i.startsWith(r + ':') || i.startsWith(r + '@'))).join(', ')
+    - expression: >-
+        variables.images.filter(i, i.startsWith('ghcr.io/shayur-p60/task-manager')).all(i, i.contains('@sha256:'))
+      message: task-manager images must be pinned by digest (image@sha256:...)
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: task-manager-image-backstop
+spec:
+  policyName: task-manager-image-backstop
+  validationActions: [Deny]
