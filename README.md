@@ -270,7 +270,7 @@ flowchart LR
         deps["pip-audit<br/>requirements*.txt"]
         iac["Trivy config<br/>Terraform · Helm · Dockerfile"]
         lint["hadolint<br/>Dockerfile"]
-        scan["Trivy image<br/>(PRs + weekly)"]
+        scan["Trivy image amd64 + arm64<br/>(PRs + weekly)"]
     end
 
     tests & gates --> gate{"push to main?"}
@@ -279,10 +279,14 @@ flowchart LR
 
     subgraph publish["publish (main only)"]
         direction TB
-        build["Buildx build<br/>(once)"] --> iscan["Trivy scan<br/>same image"]
-        iscan --> push["push to GHCR<br/>tag = git SHA"]
-        push --> sbom["Syft SBOM<br/>(SPDX)"]
-        sbom --> sign["cosign sign +<br/>attest SBOM<br/>(keyless OIDC)"]
+        subgraph perarch["per platform, native runners"]
+            direction LR
+            amd["amd64: build once →<br/>Trivy scan → push"]
+            arm["arm64: build once →<br/>Trivy scan → push"]
+        end
+        perarch --> index["multi-arch index<br/>from the 2 scanned digests<br/>tag = git SHA"]
+        index --> sbom["Syft SBOM per platform<br/>→ cosign attest"]
+        sbom --> sign["cosign sign --recursive<br/>index + platforms<br/>(keyless OIDC)"]
         sign --> verify["cosign verify +<br/>verify-attestation"]
     end
 ```
@@ -294,21 +298,36 @@ flowchart LR
 | Dependencies | pip-audit | any vulnerability in `requirements.txt`; `requirements-dev.txt` only warns |
 | Infrastructure | Trivy config: `infra/terraform`, rendered Helm charts, `Dockerfile` | HIGH / CRITICAL |
 | Dockerfile | hadolint | warnings and errors |
-| Image | Trivy (OS + Python packages) | HIGH / CRITICAL with a fix available |
+| Image | Trivy (OS + Python packages), amd64 and arm64 | HIGH / CRITICAL with a fix available |
 
-**Publishing** (push to `main` in this repository only):
+**Publishing** (push to `main` in this repository only), for
+**linux/amd64 and linux/arm64** so the image runs natively on Apple
+Silicon as well as x86 servers:
 
-1. **Build once** with Docker Buildx, tagged with the git SHA.
-2. **Scan** that exact image with Trivy; the job checks the image ID
-   hasn't changed before pushing it.
-3. **Push** to `ghcr.io/shayur-p60/task-manager:<sha>` using
-   `GITHUB_TOKEN` (`packages: write` on this job only).
-4. **SBOM**: Syft generates SPDX JSON from the pushed digest; cosign
-   attaches it as a signed attestation (also uploaded as an artifact).
-5. **Sign** the digest with cosign keyless signing (GitHub OIDC,
-   `id-token: write` on this job only).
-6. **Verify** the signature and the SBOM attestation in the same run,
-   pinned to this repository's workflow on `main`.
+1. **Per platform, on a native runner** (`ubuntu-24.04` and
+   `ubuntu-24.04-arm`, no emulation): **build once** with Docker Buildx,
+   **scan** that exact image with Trivy, check the image ID hasn't
+   changed, and **push** it as `:<sha>-amd64` / `:<sha>-arm64` using
+   `GITHUB_TOKEN` (`packages: write`). The digest the push returned is
+   handed to the next job.
+2. **Index**: `docker buildx imagetools create` makes the multi-arch
+   image `ghcr.io/shayur-p60/task-manager:<sha>` from exactly those two
+   digests. Digests are content hashes, so the index can only point at
+   what was scanned; the job also checks it lists those two and nothing
+   else.
+3. **SBOM**: Syft generates SPDX JSON for each platform from its pushed
+   digest; cosign attaches each as a signed attestation (also uploaded
+   as artifacts).
+4. **Sign** the index with cosign keyless signing (GitHub OIDC,
+   `id-token: write` on this job only); `--recursive` signs both
+   platform images too, so a platform-specific pull verifies as well.
+5. **Verify** the index and platform signatures and both SBOM
+   attestations in the same run, pinned to this repository's workflow
+   on `main`.
+
+Pull requests build and scan **both** platforms too (the
+`Image scan (Trivy)` check covers both), so an arm64-only build or
+vulnerability problem is caught before merge.
 
 To verify an image yourself, see [SECURITY.md](SECURITY.md#verify-an-image-yourself).
 
