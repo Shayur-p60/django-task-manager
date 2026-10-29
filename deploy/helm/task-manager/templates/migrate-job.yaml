@@ -3,6 +3,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: {{ include "task-manager.fullname" . }}-migrate
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "task-manager.labels" . | nindent 4 }}
     app.kubernetes.io/component: migrations

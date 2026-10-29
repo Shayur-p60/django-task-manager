@@ -5,6 +5,7 @@ login throttling), task CRUD, role-based permissions, and password reset.
 Run with: pytest
 """
 
+import re
 from datetime import timedelta
 
 import pytest
@@ -253,6 +254,18 @@ def test_edit_page_shows_task(logged_in_client, regular_user):
     response = logged_in_client.get(reverse('task_update', args=[task.id]))
     assert response.status_code == 200
     assert b'Edit me' in response.content
+
+
+@pytest.mark.django_db
+def test_task_forms_include_csrf_token(logged_in_client, regular_user):
+    # Backs up the nosemgrep comment in task_form.html: every POST form
+    # rendered by the app carries Django's CSRF token.
+    task = Task.objects.create(user=regular_user, title='Forms')
+    for url in (reverse('task_update', args=[task.id]), reverse('dashboard')):
+        content = logged_in_client.get(url).content.decode()
+        post_forms = re.findall(r'<form\b[^>]*method="post"[^>]*>(.*?)</form>', content, re.S | re.I)
+        assert post_forms
+        assert all('name="csrfmiddlewaretoken"' in form for form in post_forms)
 
 
 @pytest.mark.django_db

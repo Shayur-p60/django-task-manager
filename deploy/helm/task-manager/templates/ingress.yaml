@@ -3,6 +3,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "task-manager.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "task-manager.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}

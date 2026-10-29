@@ -3,7 +3,10 @@
 {% block content %}
     <h2>Edit task</h2>
 
-    <form method="post">
+    {# The form below does include {% csrf_token %}. Semgrep's generic-mode
+       pattern for this rule only spans a limited number of lines, so it misses
+       the token in longer forms; tasks/tests.py checks the rendered page has it. #}
+    <form method="post"> {# nosemgrep: python.django.security.django-no-csrf-token.django-no-csrf-token #}
         {% csrf_token %}
         <input type="hidden" name="next" value="{{ next }}">
         {{ form.non_field_errors }}

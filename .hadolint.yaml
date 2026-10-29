@@ -1,0 +1,7 @@
+# hadolint configuration (used by the "dockerfile" CI job).
+#
+# The build fails on warnings and errors; info and style findings are only
+# reported. No rules are ignored: the Dockerfile currently has no findings.
+# If a rule ever has to be ignored, add it under `ignored:` with a comment
+# explaining why.
+failure-threshold: warning

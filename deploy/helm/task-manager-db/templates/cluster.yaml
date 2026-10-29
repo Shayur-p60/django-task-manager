@@ -2,6 +2,7 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
   name: {{ include "task-manager-db.name" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "task-manager-db.labels" . | nindent 4 }}
 spec:
