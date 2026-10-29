@@ -1,0 +1,23 @@
+# Name of the CNPG Cluster. CNPG creates:
+#   <name>-rw   Service pointing at the primary (read/write)
+#   <name>-app  Secret with the app user's credentials and a `uri` key
+nameOverride: ""
+
+instances: 1            # 1 keeps a laptop cluster light; use 3 for HA
+
+# Leave empty to use the operator's default PostgreSQL image.
+imageName: ""
+
+database: tasks
+owner: tasks
+
+storage:
+  size: 1Gi
+  storageClass: ""      # empty = cluster default (local-path on k3s)
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 192Mi
+  limits:
+    memory: 384Mi

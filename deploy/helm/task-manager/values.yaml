@@ -1,0 +1,115 @@
+image:
+  repository: k3d-tasks-registry.localhost:5111/task-manager
+  # Required. Set to an immutable tag such as the git SHA; "latest" is rejected.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Used only when autoscaling is disabled. With the HPA enabled the
+# Deployment has no `replicas` field, so upgrades don't fight the HPA.
+replicaCount: 2
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Public host name. Drives the Ingress, ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS.
+host: tasks.localhost
+# "http" while there's no TLS on the ingress; switch to "https" with TLS.
+scheme: http
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  tls: []        # e.g. [{secretName: tasks-tls, hosts: [tasks.localhost]}]
+
+service:
+  port: 80
+
+# Database: the Secret CloudNativePG generates for the app user
+# (installed by the task-manager-db chart). Its `uri` key is a full
+# postgresql:// URL, used as DATABASE_URL.
+database:
+  secretName: task-manager-db-app
+  secretKey: uri
+
+# SECRET_KEY comes from an existing Secret, never from values.
+# `make deploy` creates it with a random value if it's missing.
+secretKey:
+  existingSecret: task-manager-secret-key
+  key: SECRET_KEY
+
+# Plain (non-secret) settings passed as environment variables.
+config:
+  DEBUG: "False"
+  # One proxy (ingress-nginx) sits in front of the app.
+  NUM_PROXIES: "1"
+  # No TLS yet, so don't redirect to HTTPS or require Secure cookies.
+  USE_HTTPS: "False"
+  # No SMTP yet: password reset emails go to the pod logs.
+  ALLOW_CONSOLE_EMAIL: "True"
+  WEB_CONCURRENCY: "2"
+  LOG_LEVEL: INFO
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 160Mi
+  limits:
+    cpu: 500m
+    memory: 384Mi
+
+migrations:
+  enabled: true
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+probes:
+  # Liveness: process only (no database), so a DB outage doesn't restart pods.
+  liveness:
+    path: /livez/
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  # Readiness: app + database; pods leave the Service while the DB is down.
+  readiness:
+    path: /healthz/
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+  # Startup: allow time for the entrypoint's deploy check and gunicorn boot.
+  startup:
+    path: /livez/
+    periodSeconds: 2
+    failureThreshold: 30
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

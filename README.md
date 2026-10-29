@@ -245,6 +245,19 @@ HTTPS at their proxy, and set `$PORT`, which gunicorn already uses.
   only raise it (for example to a year) once HTTPS works on every
   domain you use.
 
+## Run on local Kubernetes
+
+The app can also run on a local Kubernetes cluster (k3d) with
+ingress-nginx and a CloudNativePG PostgreSQL database, set up by
+Terraform and deployed with Helm:
+
+```bash
+make cluster-up build-push deploy smoke-test
+```
+
+Then open `http://tasks.localhost`. See [`infra/README.md`](infra/README.md)
+for prerequisites, the architecture and how it works.
+
 ## REST API
 
 Everything lives under `/api/`. Every task endpoint requires
@@ -401,6 +414,9 @@ task_manager_app/
 ├── manage.py
 ├── requirements.txt
 ├── requirements-dev.txt
+├── Makefile               # local Kubernetes: cluster-up, build-push, deploy, smoke-test
+├── infra/                 # Terraform for the local k3d cluster (see infra/README.md)
+├── deploy/helm/           # Helm charts: task-manager (app), task-manager-db (CNPG)
 ├── Dockerfile
 ├── docker-compose.yml     # web + postgres, for running locally
 ├── docker-entrypoint.sh   # runs migrations, then gunicorn
@@ -437,5 +453,7 @@ task_manager_app/
 - `DEBUG` defaults to `False`; set `DEBUG=True` in `.env` for local
   development. Emails go to the console unless `EMAIL_BACKEND` is set to
   SMTP.
+- `/livez/` (process up) and `/healthz/` (app + database) are the
+  liveness and readiness checks used by Kubernetes.
 - `/api/docs/` and `/api/schema/` are public (they describe the API,
   not anyone's data). The Swagger UI loads its JavaScript from a CDN.

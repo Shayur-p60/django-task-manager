@@ -1,0 +1,7 @@
+apiVersion: v2
+name: task-manager
+description: Django task manager (web app + REST API) served by gunicorn.
+type: application
+version: 0.1.0
+# appVersion is not used for the image: the tag must be set explicitly
+# (image.tag), normally to the git SHA by `make deploy`.

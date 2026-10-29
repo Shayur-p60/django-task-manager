@@ -1,0 +1,8 @@
+Task manager {{ .Values.image.tag }} deployed.
+
+  URL:      {{ .Values.scheme }}://{{ .Values.host }}/
+  API docs: {{ .Values.scheme }}://{{ .Values.host }}/api/docs/
+  Health:   {{ .Values.scheme }}://{{ .Values.host }}/healthz/
+
+Create an admin:
+  kubectl --context <ctx> -n {{ .Release.Namespace }} exec -it deploy/{{ include "task-manager.fullname" . }} -- python manage.py createsuperuser

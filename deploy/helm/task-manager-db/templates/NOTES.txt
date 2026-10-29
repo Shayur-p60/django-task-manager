@@ -1,0 +1,6 @@
+CloudNativePG cluster "{{ include "task-manager-db.name" . }}" requested.
+
+Wait for it:
+  kubectl --context <ctx> -n {{ .Release.Namespace }} wait --for=condition=Ready cluster/{{ include "task-manager-db.name" . }} --timeout=300s
+
+Connection details for the app are in Secret "{{ include "task-manager-db.name" . }}-app" (key: uri).
