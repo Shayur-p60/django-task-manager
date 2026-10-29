@@ -8,4 +8,4 @@ metadata:
   labels:
     images.task-manager/verify: enforce
   annotations:
-    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+    argocd.argoproj.io/sync-options: Delete=false,Prune=false

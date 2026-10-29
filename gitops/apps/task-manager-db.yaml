@@ -5,8 +5,8 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "0"
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
+  # No resources-finalizer: deleting this Application must never cascade
+  # to the database. (The Cluster also carries Delete=false,Prune=false.)
 spec:
   project: default
   # PostgreSQL (CloudNativePG). Synced before the app: the app's migration
