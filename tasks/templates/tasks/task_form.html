@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Edit task{% endblock %}
+{% block content %}
+    <h2>Edit task</h2>
+
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ next }}">
+        {{ form.non_field_errors }}
+        {% for field in form %}
+            <div>
+                {{ field.label_tag }}
+                {{ field.errors }}
+                {{ field }}
+            </div>
+        {% endfor %}
+        <div class="form-row">
+            <button type="submit">Save</button>
+            <a class="small" href="{{ next }}">Cancel</a>
+        </div>
+    </form>
+{% endblock %}

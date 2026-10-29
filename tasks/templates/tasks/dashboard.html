@@ -3,33 +3,79 @@
 {% block content %}
     <h2>Your Tasks</h2>
 
-    <form method="post">
+    <form method="post" action="{% url 'task_create' %}">
         {% csrf_token %}
-        <input type="hidden" name="action" value="add">
-        <input type="text" name="title" placeholder="Add a new task..." required>
-        <button type="submit">Add</button>
+        <input type="hidden" name="next" value="{{ current_url }}">
+        {{ form.title }}
+        <div class="form-row">
+            <label class="small">Due {{ form.due_date }}</label>
+            <label class="small">Priority {{ form.priority }}</label>
+            <button type="submit">Add</button>
+        </div>
     </form>
 
-    {% if tasks %}
+    {% if has_any_tasks %}
+        <form method="get" class="filters">
+            <input type="text" name="q" value="{{ filters.q }}" placeholder="Search titles...">
+            <div class="form-row">
+                <select name="status" aria-label="Status">
+                    {% for value, label in status_choices %}
+                        <option value="{{ value }}" {% if value == filters.status %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <select name="priority" aria-label="Priority">
+                    <option value="">Any priority</option>
+                    {% for value, label in priority_choices %}
+                        <option value="{{ value }}" {% if value|stringformat:"s" == filters.priority %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <select name="sort" aria-label="Sort by">
+                    {% for value, label in sort_choices %}
+                        <option value="{{ value }}" {% if value == filters.sort %}selected{% endif %}>Sort: {{ label }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit">Apply</button>
+                <a class="small" href="{% url 'dashboard' %}">Reset</a>
+            </div>
+        </form>
+
         {% for task in tasks %}
-            <div class="task-row {% if task.completed %}completed{% endif %}">
-                <span class="task-title">{{ task.title }}</span>
+            <div class="task-row {% if task.completed %}completed{% endif %} {% if task.is_overdue %}overdue{% endif %}">
+                <span>
+                    <span class="task-title">{{ task.title }}</span>
+                    <span class="badge priority-{{ task.get_priority_display|lower }}">{{ task.get_priority_display }}</span>
+                    {% if task.is_overdue %}<span class="badge overdue-badge">Overdue</span>{% endif %}
+                    {% if task.due_date %}<br><span class="small">Due {{ task.due_date|date:"j M Y" }}</span>{% endif %}
+                </span>
                 <span class="task-actions">
-                    <form method="post">
+                    <a class="btn" href="{% url 'task_update' task.pk %}?next={{ current_url|urlencode:'' }}">Edit</a>
+                    <form method="post" action="{% url 'task_toggle' task.pk %}">
                         {% csrf_token %}
-                        <input type="hidden" name="action" value="toggle">
-                        <input type="hidden" name="task_id" value="{{ task.id }}">
+                        <input type="hidden" name="next" value="{{ current_url }}">
                         <button type="submit">{% if task.completed %}Undo{% else %}Done{% endif %}</button>
                     </form>
-                    <form method="post">
+                    <form method="post" action="{% url 'task_delete' task.pk %}">
                         {% csrf_token %}
-                        <input type="hidden" name="action" value="delete">
-                        <input type="hidden" name="task_id" value="{{ task.id }}">
+                        <input type="hidden" name="next" value="{{ current_url }}">
                         <button type="submit">Delete</button>
                     </form>
                 </span>
             </div>
+        {% empty %}
+            <p class="small">No tasks match these filters.</p>
         {% endfor %}
+
+        {% if page_obj.paginator.num_pages > 1 %}
+            <div class="pagination">
+                {% if page_obj.has_previous %}
+                    <a href="?{% if querystring %}{{ querystring }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">&laquo; Previous</a>
+                {% else %}<span></span>{% endif %}
+                <span class="small">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+                {% if page_obj.has_next %}
+                    <a href="?{% if querystring %}{{ querystring }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Next &raquo;</a>
+                {% else %}<span></span>{% endif %}
+            </div>
+        {% endif %}
     {% else %}
         <p class="small">You don't have any tasks yet — add one above.</p>
     {% endif %}

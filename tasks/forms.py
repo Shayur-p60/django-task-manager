@@ -2,6 +2,9 @@ from django import forms
 from django.conf import settings
 from django.contrib.auth.forms import AuthenticationForm
 from django.core.cache import cache
+from django.utils import timezone
+
+from .models import Task
 
 
 def _attempts_cache_key(username: str) -> str:
@@ -59,3 +62,44 @@ class ThrottledAuthenticationForm(AuthenticationForm):
             cache.delete(_attempts_cache_key(username))
 
         return cleaned_data
+
+
+class TaskForm(forms.ModelForm):
+    """
+    Create/edit form for a task. The "completed" checkbox only appears when
+    editing an existing task; new tasks always start as not completed.
+    """
+
+    class Meta:
+        model = Task
+        fields = ['title', 'description', 'due_date', 'priority', 'completed']
+        widgets = {
+            'title': forms.TextInput(attrs={'placeholder': 'Add a new task...'}),
+            'description': forms.Textarea(attrs={'rows': 3, 'placeholder': 'Details (optional)'}),
+            'due_date': forms.DateInput(attrs={'type': 'date'}, format='%Y-%m-%d'),
+        }
+        error_messages = {
+            'title': {'required': 'Task title cannot be empty.'},
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.is_new:
+            del self.fields['completed']
+        # Priority falls back to the model default (medium) when not sent.
+        self.fields['priority'].required = False
+
+    @property
+    def is_new(self):
+        return self.instance.pk is None
+
+    def clean_priority(self):
+        return self.cleaned_data.get('priority') or Task.Priority.MEDIUM
+
+    def clean_due_date(self):
+        due_date = self.cleaned_data.get('due_date')
+        # Only block past dates on create, so an existing overdue task can
+        # still be edited without having to change its due date.
+        if self.is_new and due_date and due_date < timezone.localdate():
+            raise forms.ValidationError('Due date cannot be in the past.', code='past_due_date')
+        return due_date
