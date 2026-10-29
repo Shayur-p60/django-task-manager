@@ -54,6 +54,28 @@ linux/arm64** and are additionally:
   platforms, `cosign verify-attestation` for both SBOMs) before the job
   succeeds.
 
+### Only signed images run in the cluster
+
+On the local Kubernetes platform, Kyverno admission policies
+([`gitops/platform/policies.yaml`](gitops/platform/policies.yaml)) allow
+an image in the `task-manager` namespace only if it is cosign-signed by
+the exact workflow that builds it:
+
+| Image | Required signer |
+|---|---|
+| `ghcr.io/shayur-p60/task-manager` | `…/django-task-manager/.github/workflows/ci.yml@refs/heads/main` |
+| `ghcr.io/cloudnative-pg/postgresql` | `…/cloudnative-pg/postgres-containers/.github/workflows/bake_targets.yml@refs/heads/main` |
+| `ghcr.io/cloudnative-pg/cloudnative-pg` | `…/cloudnative-pg/cloudnative-pg/.github/workflows/release-publish.yml@refs/tags/vX.Y.Z` |
+
+Every other image is denied. If Kyverno is unreachable, its webhooks
+fail closed: no new pods start. If Kyverno is shut down gracefully, it
+removes its webhooks; a native `ValidatingAdmissionPolicy` backstop
+(`gitops/platform/backstop.yaml`) still limits the namespace to the three
+repositories above and requires digests, but signatures aren't checked
+until Kyverno is back (see the runbook in `infra/README.md`). This holds even if a bad digest is
+committed to `gitops/`: git decides *what* should run, but only images
+signed by CI on `main` *can* run.
+
 ### Verify an image yourself
 
 The index digest is in the run summary, or:

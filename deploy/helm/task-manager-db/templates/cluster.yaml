@@ -5,6 +5,11 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "task-manager-db.labels" . | nindent 4 }}
+  annotations:
+    # Stateful: Argo CD must never delete this, even if it's removed from
+    # git (prune) or its Application is deleted. Deleting the database is
+    # always a deliberate, manual step.
+    argocd.argoproj.io/sync-options: Delete=false,Prune=false
 spec:
   instances: {{ .Values.instances }}
   {{- with .Values.imageName }}

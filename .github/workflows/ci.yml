@@ -179,6 +179,44 @@ jobs:
       - name: helm lint and helm template | kubeconform
         run: make helm-check
 
+  changes:
+    name: Detect changes
+    # Decides whether this push needs a new image. A commit that only touches
+    # gitops/ (a promotion or a rollback) must not publish, or every
+    # promotion would trigger another build and promotion.
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.detect.outputs.app }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Anything outside gitops/ changed?
+        id: detect
+        env:
+          BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
+        run: .github/scripts/detect-changes.sh "$BASE" "${HEAD:-$GITHUB_SHA}"
+
+  gitops-check:
+    name: GitOps manifests check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Applications must track main
+        run: |
+          pip install "pyyaml==6.0.3"
+          python .github/scripts/check-gitops-target.py gitops/apps
+
   # ------------------------------------------------------- security gates --
 
   secrets:
@@ -472,8 +510,9 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
-      github.repository == 'Shayur-p60/django-task-manager'
-    needs: [test, docker-smoke, k8s-lint, secrets, sast, dependencies, iac, dockerfile]
+      github.repository == 'Shayur-p60/django-task-manager' &&
+      needs.changes.outputs.app == 'true'
+    needs: [changes, test, docker-smoke, k8s-lint, gitops-check, secrets, sast, dependencies, iac, dockerfile]
     runs-on: ${{ matrix.runner }}
     concurrency:
       group: publish-main-${{ matrix.arch }}
@@ -577,6 +616,8 @@ jobs:
     concurrency:
       group: publish-main
       cancel-in-progress: false
+    outputs:
+      index_digest: ${{ steps.index.outputs.digest }}
     permissions:
       contents: read
       packages: write        # push the index and attestations to GHCR
@@ -612,6 +653,7 @@ jobs:
           merge-multiple: true
 
       - name: Create the multi-arch index from those digests
+        id: index
         run: |
           amd64="$(cat digests/amd64)"
           arm64="$(cat digests/arm64)"
@@ -628,6 +670,7 @@ jobs:
             echo "AMD64_REF=$IMAGE_NAME@$amd64"
             echo "ARM64_REF=$IMAGE_NAME@$arm64"
           } >> "$GITHUB_ENV"
+          echo "digest=$index" >> "$GITHUB_OUTPUT"
           echo "Index $index -> amd64 $amd64, arm64 $arm64"
 
       - name: Generate SBOMs and attach them as signed attestations
@@ -685,3 +728,91 @@ jobs:
             echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # ------------------------------------------------------------- promotion --
+  #
+  # After a successful publish, open a pull request that points the local
+  # environment (gitops/envs/local) at the new image's tag and index digest,
+  # and enable auto-merge. Argo CD deploys it once it merges.
+  #
+  # Why a PR (not a direct commit): main is protected, and a PR keeps every
+  # promotion reviewable, gated by CI and easy to revert. It's opened with a
+  # GitHub App token because PRs opened with GITHUB_TOKEN don't trigger CI,
+  # so their required checks would never run. The PR only touches gitops/,
+  # so the "changes" job skips publishing and there's no build loop.
+  #
+  # Off until the App is set up: set the repository variable
+  # PROMOTION_ENABLED=true (see README, "Promotion").
+
+  promote:
+    name: Promote to local environment (PR)
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'Shayur-p60/django-task-manager' &&
+      vars.PROMOTION_ENABLED == 'true'
+    needs: publish
+    runs-on: ubuntu-24.04
+    # App ID (variable) and private key (secret) live only in this
+    # environment, which is restricted to the main branch.
+    environment: promotion
+    concurrency:
+      group: promote-local
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    env:
+      VALUES_FILE: gitops/envs/local/task-manager/values.yaml
+      DIGEST: ${{ needs.publish.outputs.index_digest }}
+    steps:
+      - name: Get a short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.PROMOTION_APP_ID }}
+          private-key: ${{ secrets.PROMOTION_APP_PRIVATE_KEY }}
+          # Ask for exactly what this job needs, even if the App has more.
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Point the local environment at the new image
+        run: |
+          case "$DIGEST" in sha256:????????????????????????????????????????????????????????????????) ;; *) echo "::error::Bad digest '$DIGEST'"; exit 1 ;; esac
+          yq -i '.image.tag = strenv(GITHUB_SHA) | .image.digest = strenv(DIGEST)' "$VALUES_FILE"
+          git diff --exit-code --quiet "$VALUES_FILE" && { echo "Already at $GITHUB_SHA"; echo "CHANGED=false" >> "$GITHUB_ENV"; exit 0; }
+          git diff "$VALUES_FILE"
+          echo "CHANGED=true" >> "$GITHUB_ENV"
+
+      - name: Open the promotion PR and enable auto-merge
+        if: env.CHANGED == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          short="${GITHUB_SHA:0:12}"
+          branch="promote/local-$short"
+          bot_id="$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -m "Promote task-manager $short to local" -m "image.tag: $GITHUB_SHA" -m "image.digest: $DIGEST" "$VALUES_FILE"
+          git push origin "$branch"
+          url="$(gh pr create --base main --head "$branch" \
+            --title "Promote task-manager $short to local" \
+            --body "Automated promotion after [publish run $GITHUB_RUN_ID]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID).
+
+          | | |
+          |---|---|
+          | Commit | \`$GITHUB_SHA\` |
+          | Image index digest | \`$DIGEST\` |
+          | Signed by | \`ci.yml@refs/heads/main\` (verified in the publish job) |
+
+          Merging lets Argo CD deploy it. Kyverno admits the pods only if the digest is signed by this repository's ci.yml on main. To roll back, revert this PR's commit.")"
+          gh pr merge "$url" --auto --merge
+          echo "Opened $url with auto-merge" >> "$GITHUB_STEP_SUMMARY"
+

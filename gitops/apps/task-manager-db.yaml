@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: task-manager-db
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  # No resources-finalizer: deleting this Application must never cascade
+  # to the database. (The Cluster also carries Delete=false,Prune=false.)
+spec:
+  project: default
+  # PostgreSQL (CloudNativePG). Synced before the app: the app's migration
+  # hook needs the database and its generated Secret.
+  sources:
+    - repoURL: https://github.com/Shayur-p60/django-task-manager.git
+      targetRevision: main
+      path: deploy/helm/task-manager-db
+      helm:
+        releaseName: task-manager-db
+        valueFiles:
+          - $values/gitops/envs/local/task-manager-db/values.yaml
+    - repoURL: https://github.com/Shayur-p60/django-task-manager.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: task-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff: {duration: 10s, factor: 2, maxDuration: 3m}
