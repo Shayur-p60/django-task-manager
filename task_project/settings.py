@@ -246,7 +246,7 @@ if not DEBUG:
     USE_HTTPS = config('USE_HTTPS', default=True, cast=bool)
 
     SECURE_SSL_REDIRECT = USE_HTTPS
-    SECURE_REDIRECT_EXEMPT = [r'^healthz/$']  # platform health checks use plain HTTP
+    SECURE_REDIRECT_EXEMPT = [r'^healthz/$', r'^livez/$']  # health checks use plain HTTP
     SESSION_COOKIE_SECURE = USE_HTTPS
     CSRF_COOKIE_SECURE = USE_HTTPS
 

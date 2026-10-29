@@ -28,6 +28,16 @@ SORT_ORDERING = {
 
 
 @require_http_methods(['GET', 'HEAD'])
+def livez(request):
+    """
+    Liveness check: the process is up and serving requests. Deliberately
+    doesn't touch the database, so a database outage makes pods "not
+    ready" (via /healthz/) instead of getting them restarted.
+    """
+    return JsonResponse({'status': 'ok'})
+
+
+@require_http_methods(['GET', 'HEAD'])
 def healthz(request):
     """Health check for Docker and hosting platforms: app is up and the DB answers."""
     try:

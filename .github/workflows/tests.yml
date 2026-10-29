@@ -92,3 +92,33 @@ jobs:
       - name: Stop containers
         if: always()
         run: docker compose down -v
+
+  k8s:
+    # Static checks for the Kubernetes platform: Terraform and Helm charts.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.17.1"
+          terraform_wrapper: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "v4.3.1"
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin kubeconform
+          kubeconform -v
+
+      - name: terraform fmt -check and validate
+        run: make tf-check
+
+      - name: helm lint and helm template | kubeconform
+        run: make helm-check

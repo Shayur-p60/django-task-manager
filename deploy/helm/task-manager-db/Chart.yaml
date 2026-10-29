@@ -1,0 +1,8 @@
+apiVersion: v2
+name: task-manager-db
+description: PostgreSQL for the task manager, run by the CloudNativePG operator.
+type: application
+version: 0.1.0
+# Installed as its own release, before the app chart: the app's migration
+# hook runs before the app chart's own resources exist, so the database
+# and its generated secret must already be there.

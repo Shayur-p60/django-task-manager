@@ -1,0 +1,23 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "task-manager-db.name" . }}
+  labels:
+    {{- include "task-manager-db.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.instances }}
+  {{- with .Values.imageName }}
+  imageName: {{ . }}
+  {{- end }}
+  enableSuperuserAccess: false
+  bootstrap:
+    initdb:
+      database: {{ .Values.database }}
+      owner: {{ .Values.owner }}
+  storage:
+    size: {{ .Values.storage.size }}
+    {{- with .Values.storage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+  resources:
+    {{- toYaml .Values.resources | nindent 4 }}

@@ -33,12 +33,21 @@ def test_healthz_reports_database_failure(client):
     assert response.json()['status'] == 'error'
 
 
-def test_healthz_is_exempt_from_https_redirect(settings, client):
+def test_livez_ok_without_database(client):
+    # Liveness must not depend on the database.
+    with mock.patch('tasks.views.connection.cursor', side_effect=Exception('db down')):
+        response = client.get(reverse('livez'))
+    assert response.status_code == 200
+    assert response.json() == {'status': 'ok'}
+
+
+def test_health_checks_are_exempt_from_https_redirect(settings, client):
     # The real production value, restored over the test fixture's override.
     settings.SECURE_SSL_REDIRECT = True
-    settings.SECURE_REDIRECT_EXEMPT = [r'^healthz/$']
+    settings.SECURE_REDIRECT_EXEMPT = [r'^healthz/$', r'^livez/$']
     with mock.patch('tasks.views.connection.cursor'):
         assert client.get('/healthz/').status_code == 200
+    assert client.get('/livez/').status_code == 200
     assert client.get('/login/').status_code == 301
 
 

@@ -1,0 +1,51 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "task-manager.fullname" . }}-migrate
+  labels:
+    {{- include "task-manager.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrations
+  annotations:
+    # Runs before the web pods are created or updated, once per install/upgrade.
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    # Delete the previous Job before a new run and after success. A failed
+    # Job is kept so its logs can be inspected.
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "task-manager.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrations
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "task-manager.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # The image's entrypoint runs `check --deploy`, then `migrate`
+          # (RUN_MIGRATIONS=1), then this command.
+          args: ["python", "manage.py", "showmigrations", "--plan"]
+          env:
+            - name: RUN_MIGRATIONS
+              value: "1"
+            {{- include "task-manager.env" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+{{- end }}
