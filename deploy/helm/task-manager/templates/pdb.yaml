@@ -3,6 +3,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: {{ include "task-manager.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "task-manager.labels" . | nindent 4 }}
 spec:

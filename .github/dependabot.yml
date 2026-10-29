@@ -1,0 +1,33 @@
+# Keeps dependencies, the base image digest and pinned action SHAs current.
+# Security updates are raised as soon as an advisory is published; the
+# schedule below covers routine version updates.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels: [dependencies, python]
+    groups:
+      # Patch and minor bumps arrive as one PR; major ones stay separate.
+      python-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, docker]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, github-actions]
+    groups:
+      github-actions:
+        patterns: ["*"]

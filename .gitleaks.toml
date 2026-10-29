@@ -1,0 +1,13 @@
+# gitleaks configuration (used by the "secrets" CI job).
+#
+# Uses gitleaks' built-in rules unchanged. A scan of the full history
+# (gitleaks 8.30.1) found nothing, so there are no allowlist entries.
+#
+# If an entry is ever needed, add it under [[allowlists]] with:
+#   - the narrowest match possible (a specific path + regex, never a whole rule),
+#   - a `description` saying why it isn't a real secret.
+# A real secret must be rotated, not allowlisted: deleting it from the
+# code doesn't remove it from git history.
+
+[extend]
+useDefault = true

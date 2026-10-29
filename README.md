@@ -245,6 +245,100 @@ HTTPS at their proxy, and set `$PORT`, which gunicorn already uses.
   only raise it (for example to a year) once HTTPS works on every
   domain you use.
 
+## Secure CI/CD pipeline
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull
+request, every push to `main`, and weekly. Security gates fail the build
+on real findings and upload their results (SARIF) to the repository's
+**Security → Code scanning** tab. Only a push to `main` publishes an
+image, and only after every gate has passed.
+
+```mermaid
+flowchart LR
+    trigger(["PR / push to main / weekly"]) --> tests & gates
+
+    subgraph tests["Tests"]
+        direction TB
+        pytest["pytest +<br/>check --deploy"] --> smoke["Docker smoke test<br/>(compose + insecure-key refusal)"]
+        k8s["Terraform fmt/validate<br/>helm lint + kubeconform"]
+    end
+
+    subgraph gates["Security gates (SARIF → Security tab)"]
+        direction TB
+        secrets["gitleaks<br/>full history"]
+        sast["Semgrep<br/>Python + Django"]
+        deps["pip-audit<br/>requirements*.txt"]
+        iac["Trivy config<br/>Terraform · Helm · Dockerfile"]
+        lint["hadolint<br/>Dockerfile"]
+        scan["Trivy image<br/>(PRs + weekly)"]
+    end
+
+    tests & gates --> gate{"push to main?"}
+    gate -- no --> done(["done"])
+    gate -- yes --> publish
+
+    subgraph publish["publish (main only)"]
+        direction TB
+        build["Buildx build<br/>(once)"] --> iscan["Trivy scan<br/>same image"]
+        iscan --> push["push to GHCR<br/>tag = git SHA"]
+        push --> sbom["Syft SBOM<br/>(SPDX)"]
+        sbom --> sign["cosign sign +<br/>attest SBOM<br/>(keyless OIDC)"]
+        sign --> verify["cosign verify +<br/>verify-attestation"]
+    end
+```
+
+| Stage | Tool | Fails on |
+|---|---|---|
+| Secrets | gitleaks (full git history) | any finding |
+| Code | Semgrep (`p/python`, `p/django`) | `ERROR` severity |
+| Dependencies | pip-audit | any vulnerability in `requirements.txt`; `requirements-dev.txt` only warns |
+| Infrastructure | Trivy config: `infra/terraform`, rendered Helm charts, `Dockerfile` | HIGH / CRITICAL |
+| Dockerfile | hadolint | warnings and errors |
+| Image | Trivy (OS + Python packages) | HIGH / CRITICAL with a fix available |
+
+**Publishing** (push to `main` in this repository only):
+
+1. **Build once** with Docker Buildx, tagged with the git SHA.
+2. **Scan** that exact image with Trivy; the job checks the image ID
+   hasn't changed before pushing it.
+3. **Push** to `ghcr.io/shayur-p60/task-manager:<sha>` using
+   `GITHUB_TOKEN` (`packages: write` on this job only).
+4. **SBOM**: Syft generates SPDX JSON from the pushed digest; cosign
+   attaches it as a signed attestation (also uploaded as an artifact).
+5. **Sign** the digest with cosign keyless signing (GitHub OIDC,
+   `id-token: write` on this job only).
+6. **Verify** the signature and the SBOM attestation in the same run,
+   pinned to this repository's workflow on `main`.
+
+To verify an image yourself, see [SECURITY.md](SECURITY.md#verify-an-image-yourself).
+
+**Hardening of the pipeline itself:**
+- All actions are pinned to full commit SHAs, and downloaded tools are
+  pinned by SHA-256.
+- The workflow token is read-only by default; jobs request extra
+  permissions individually.
+- `pull_request_target` is never used.
+- The base image is pinned by digest.
+- Dependabot keeps pip packages, the base image and the actions up to
+  date.
+
+Details, accepted findings and the manual repository settings are in
+[SECURITY.md](SECURITY.md).
+
+### Running the scanners locally
+
+```bash
+brew install gitleaks trivy hadolint syft cosign
+pip install semgrep pip-audit
+
+gitleaks git . --config .gitleaks.toml --redact
+semgrep scan --config p/python --config p/django --metrics off
+pip-audit -r requirements.txt
+hadolint Dockerfile
+trivy config infra/terraform
+docker build -t task-manager:scan . && .github/scripts/scan-image.sh task-manager:scan
+```
+
 ## Run on local Kubernetes
 
 The app can also run on a local Kubernetes cluster (k3d) with
@@ -403,9 +497,10 @@ OpenAPI docs.
 the `SECRET_KEY` check, `DATABASE_URL` parsing, the HTTPS settings and
 email configuration.
 
-CI (`.github/workflows/tests.yml`) runs the tests, runs
-`check --deploy` with production settings, then builds the Docker image
-and starts the compose stack until it reports healthy.
+CI (`.github/workflows/ci.yml`) runs the tests, runs `check --deploy`
+with production settings, builds the Docker image and starts the compose
+stack until it reports healthy, then runs the security gates described
+in [Secure CI/CD pipeline](#secure-cicd-pipeline).
 
 ## Project structure
 
@@ -414,6 +509,11 @@ task_manager_app/
 ├── manage.py
 ├── requirements.txt
 ├── requirements-dev.txt
+├── SECURITY.md            # vulnerability reporting, pipeline guarantees, accepted findings
+├── .github/
+│   ├── workflows/ci.yml   # tests, security gates, signed release
+│   ├── scripts/           # tool installer (SHA-256 checked), image scan, pip-audit → SARIF
+│   └── dependabot.yml
 ├── Makefile               # local Kubernetes: cluster-up, build-push, deploy, smoke-test
 ├── infra/                 # Terraform for the local k3d cluster (see infra/README.md)
 ├── deploy/helm/           # Helm charts: task-manager (app), task-manager-db (CNPG)

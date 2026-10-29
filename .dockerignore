@@ -1,17 +1,40 @@
+# Only what the app needs at runtime goes into the image.
+
+# VCS, CI and editor files
 .git
 .github
+.gitignore
+.idea
+.vscode
+.DS_Store
+
+# Secrets and local environment
 .env
 .env.*
 !.env.example
+
+# Python caches and local virtualenvs
 venv
 .venv
 __pycache__
 **/__pycache__
 *.pyc
 .pytest_cache
+
+# Local data and build output
 db.sqlite3
 staticfiles
-.DS_Store
-.idea
-.vscode
+
+# Infrastructure and deployment (not needed in the image; infra/terraform/.terraform
+# also holds provider binaries that would add ~120 MB and their CVEs)
+infra
+deploy
+Makefile
 docker-compose.yml
+
+# Docs and scanner configuration
+*.md
+.gitleaks.toml
+.semgrepignore
+.trivyignore.yaml
+.hadolint.yaml

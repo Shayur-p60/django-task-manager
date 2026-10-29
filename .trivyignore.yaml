@@ -1,0 +1,35 @@
+# Trivy suppressions (used by the image and infrastructure-config scans).
+#
+# There are currently no suppressions: every fixable HIGH/CRITICAL finding
+# has been fixed. Unfixed vulnerabilities in Debian base packages don't
+# need entries here: the image gate uses --ignore-unfixed, and they are
+# still reported to the GitHub Security tab (see SECURITY.md).
+#
+# Rules for adding an entry:
+#   - Fix the finding if at all possible; suppress only when it can't be
+#     fixed yet or doesn't apply, and say which in `statement`.
+#   - Scope it as narrowly as possible (`paths` / `purls`).
+#   - Always set `expired_at` about 90 days out, so the suppression is
+#     reviewed instead of living forever. An expired entry stops applying
+#     and the finding fails the build again.
+#
+# Example:
+#
+# vulnerabilities:
+#   - id: CVE-2026-00000
+#     purls:
+#       - pkg:pypi/example@1.2.3
+#     statement: >-
+#       Only reachable through example.feature(), which this app doesn't
+#       call. No fixed version yet; upgrade when one is released.
+#     expired_at: 2027-01-27
+#
+# misconfigurations:
+#   - id: KSV-0000
+#     paths:
+#       - "rendered/task-manager.yaml"
+#     statement: Why this check doesn't apply here.
+#     expired_at: 2027-01-27
+
+vulnerabilities: []
+misconfigurations: []

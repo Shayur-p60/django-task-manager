@@ -1,0 +1,16 @@
+# Paths Semgrep doesn't scan. (A .semgrepignore replaces Semgrep's defaults,
+# so the usual generated and third-party directories are listed here.)
+#
+# Suppressions of individual findings are inline `nosemgrep` comments with
+# the reason next to them; see SECURITY.md for the list.
+
+# Local environments and third-party code
+venv/
+.venv/
+node_modules/
+
+# Generated files
+staticfiles/
+**/__pycache__/
+infra/terraform/.terraform/
+infra/terraform/.generated/
