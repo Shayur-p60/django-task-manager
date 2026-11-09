@@ -244,7 +244,7 @@ jobs:
 
       - name: Upload SARIF
         if: always() && env.CAN_UPLOAD_SARIF == 'true' && hashFiles('gitleaks.sarif') != ''
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: gitleaks.sarif
           category: gitleaks
@@ -287,7 +287,7 @@ jobs:
 
       - name: Upload SARIF
         if: always() && env.CAN_UPLOAD_SARIF == 'true' && hashFiles('semgrep.sarif') != ''
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: semgrep.sarif
           category: semgrep
@@ -329,14 +329,14 @@ jobs:
 
       - name: Upload SARIF (runtime)
         if: always() && env.CAN_UPLOAD_SARIF == 'true' && hashFiles('sarif-runtime.sarif') != ''
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: sarif-runtime.sarif
           category: pip-audit-runtime
 
       - name: Upload SARIF (dev)
         if: always() && env.CAN_UPLOAD_SARIF == 'true' && hashFiles('sarif-dev.sarif') != ''
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: sarif-dev.sarif
           category: pip-audit-dev
@@ -398,7 +398,7 @@ jobs:
 
       - name: Upload SARIF
         if: always() && env.CAN_UPLOAD_SARIF == 'true' && hashFiles('trivy-config.sarif') != ''
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: trivy-config.sarif
           category: trivy-config-${{ matrix.target }}
@@ -428,7 +428,7 @@ jobs:
 
       - name: Upload SARIF
         if: always() && env.CAN_UPLOAD_SARIF == 'true' && hashFiles('hadolint.sarif') != ''
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: hadolint.sarif
           category: hadolint
@@ -477,7 +477,7 @@ jobs:
 
       - name: Upload SARIF
         if: always() && env.CAN_UPLOAD_SARIF == 'true' && hashFiles('trivy-image.sarif') != ''
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: trivy-image.sarif
           category: trivy-image-${{ matrix.arch }}
@@ -543,7 +543,7 @@ jobs:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GHCR
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -580,7 +580,7 @@ jobs:
 
       - name: Upload SARIF
         if: always() && hashFiles('trivy-image.sarif') != ''
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: trivy-image.sarif
           category: trivy-image-${{ matrix.arch }}
@@ -639,7 +639,7 @@ jobs:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GHCR
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
